@@ -3,28 +3,39 @@ import java.net.URL
 import java.nio.file.{FileAlreadyExistsException, Files, Paths}
 import java.util.UUID
 
+import Main._
+import com.typesafe.config.{Config, ConfigFactory}
 import com.vk.api.sdk.client.VkApiClient
 import com.vk.api.sdk.httpclient.HttpTransportClient
 import com.vk.api.sdk.objects.photos.Photo
 import com.vk.api.sdk.objects.wall.WallpostAttachmentType
 import com.vk.api.sdk.objects.wall.responses.GetResponse
+import org.telegram.telegrambots.api.methods.send.SendPhoto
+import org.telegram.telegrambots.api.objects.Update
+import org.telegram.telegrambots.bots.TelegramLongPollingBot
+import org.telegram.telegrambots.{ApiContextInitializer, TelegramBotsApi}
+
+import scala.util.Random
 
 /**
   * Created by time2die on 05.01.17
   */
 object Main {
+  val conf: Config = ConfigFactory.load
+
   def main(args: Array[String]): Unit = {
     val appId = 6065032
     val transportClient = new HttpTransportClient()
     val vk = new VkApiClient(transportClient)
 
     import com.vk.api.sdk.client.actors.ServiceActor
-    val actor = new ServiceActor(appId, "c6a0e2f7a44275fda2c7e96299aff791eefc3c37e427c53fa4cc10dc7a4b1ad21d04d7223494928c8c3bd")
+    val actor = new ServiceActor(appId, conf.getString("tgBotKey"))
 
     val getResponse: GetResponse = vk.wall()
       .get(actor)
-      .domain("personal_witches")
-      .count(5)
+//      .domain("personal_witches")
+      .domain("red_shine")
+      .count(10500)
       .offset(0)
       .execute()
 
@@ -37,12 +48,15 @@ object Main {
     val postPhotos = postAttachmentTouples.map(i => (i._1, i._2.filter(_.getType == WallpostAttachmentType.PHOTO))).map(i => (i._1, i._2.map(_.getPhoto)))
     val postLinks = postPhotos.map(i => (i._1, i._2.map(getMaxResolutionPhotos(_))))
 
-    println("beforeDownload")
+    val links = postLinks.flatMap(_._2).map(_.get.url)
+    //    postLinks.par.foreach(i =>
+    //      i._2.foreach(pI => pI.foreach(downloadFile))
+    //    )
+    //    println("end")
 
-    postLinks.par.foreach(i =>
-      i._2.foreach(pI => pI.foreach(downloadFile))
-    )
-    println("end")
+    ApiContextInitializer.init()
+    new TelegramBotsApi().registerBot(new PictureBot(links))
+
   }
 
   val resolution = List(2560, 1280, 807, 604, 130, 75)
@@ -98,5 +112,27 @@ object Main {
   case class PhotoContainer(url: String, res: Integer)
 
 }
+
+class PictureBot(links: List[String]) extends TelegramLongPollingBot {
+
+  val rnd: Random = new Random()
+
+  println(s"start bot\nphotos:${links.size}")
+
+  override def getBotUsername: String = "tRussianBank"
+
+  override def getBotToken: String = conf.getString("tgBotKey")
+
+  override def onUpdateReceived(update: Update): Unit = {
+    val photoUrl = links(rnd.nextInt(links.length))
+    val in: InputStream = new URL(photoUrl).openStream()
+    val sp = new SendPhoto()
+      .setChatId(update.getMessage.getChatId)
+      .setNewPhoto(UUID.randomUUID().toString, in)
+
+    sendPhoto(sp)
+  }
+}
+
 
 
